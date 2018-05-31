@@ -1,0 +1,35 @@
+.root {
+	-fx-base: black;
+	-fx-accent: white;
+	-fx-focus-color: white;
+}
+
+.button {
+	-fx-text-fill: white;
+}
+
+.playbutton {
+	-fx-font-family: Play;
+	-fx-font-size: 20;
+}
+
+.hbox {
+	-fx-alignment: center;
+	-fx-background-color: black;
+	-fx-min-height: 50;
+}
+
+.combo-box .list-cell {
+	-fx-background-color: black;
+	-fx-text-fill: white;
+}
+
+.combo-box-base {
+	-fx-background-color: black;
+}
+
+.title { 
+	-fx-text-fill: yellow;
+	-fx-font-family: Play;
+	-fx-font-size: 20px;
+}
