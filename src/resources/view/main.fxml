@@ -69,7 +69,7 @@
             <RowConstraints valignment="CENTER" vgrow="NEVER" />
         </rowConstraints>
          <children>
-            <Button fx:id="playButton" mnemonicParsing="false" prefHeight="35.0" prefWidth="140.0" styleClass="playbutton" text="Button" GridPane.halignment="CENTER" GridPane.rowIndex="2">
+            <Button fx:id="playButton" mnemonicParsing="false" prefHeight="35.0" prefWidth="140.0" styleClass="playbutton" GridPane.halignment="CENTER" GridPane.rowIndex="2">
                <GridPane.margin>
                   <Insets bottom="10.0" left="10.0" right="10.0" top="10.0" />
                </GridPane.margin>

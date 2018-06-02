@@ -5,6 +5,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
+import java.util.logging.LogManager;
 
 import org.jaudiotagger.audio.AudioFile;
 import org.jaudiotagger.audio.AudioFileIO;
@@ -39,6 +40,8 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.media.AudioSpectrumListener;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaPlayer;
 import javafx.scene.media.MediaPlayer.Status;
@@ -55,9 +58,9 @@ public class Main extends Application implements Initializable {
 
   private static final int CANVAS_HEIGHT = 600;
 
-  private static final int THRESHOLD = -80;
+  private static final int THRESHOLD = -100;
 
-  private static final int NUMBER_OF_BANDS = 64;
+  private static final int NUMBER_OF_BANDS = 32;
 
   private GraphicsContext ctx;
 
@@ -67,7 +70,7 @@ public class Main extends Application implements Initializable {
 
   private ObservableList<Float> phases;
 
-  private List<Color> colors;
+  private ObservableList<Color> colors;
 
   private String artistName;
 
@@ -122,7 +125,7 @@ public class Main extends Application implements Initializable {
   public void start(Stage primaryStage) {
     try {
       root = FXMLLoader.load(getClass().getResource("/resources/view/main.fxml"));
-      Scene scene = new Scene(root, 800, 790);
+      Scene scene = new Scene(root, 800, 800);
       primaryStage.setScene(scene);
       primaryStage.getIcons().add(new Image(getClass().getResourceAsStream("/resources/icon.png")));
       scene.getStylesheets().add("https://fonts.googleapis.com/css?family=Play");
@@ -139,6 +142,7 @@ public class Main extends Application implements Initializable {
   @FXML
   private void openFile() {
     FileChooser chooser = new FileChooser();
+    chooser.getExtensionFilters().addAll(new FileChooser.ExtensionFilter("Music Files", "*.mp3", "*.m4a", "*.wav"));
     File selectedFile = chooser.showOpenDialog(root.getScene().getWindow());
     if (selectedFile != null) {
       if (musicPlayingProperty.get()) {
@@ -147,9 +151,11 @@ public class Main extends Application implements Initializable {
       selectedFileProperty.set(selectedFile);
       fileDirtyProperty.set(true);
       mp = new MediaPlayer(new Media(selectedFile.toURI().toString()));
-      mp.setOnEndOfMedia(() -> mp.stop());
-      musicPlayingProperty.bind(mp.statusProperty().isEqualTo(Bindings.createObjectBinding(() -> Status.PLAYING, mp.statusProperty())));
-
+      mp.setOnEndOfMedia(() -> {
+        mp.stop();
+        mp.seek(Duration.millis(0));
+      });
+      musicPlayingProperty.bind(mp.statusProperty().isEqualTo(Bindings.createObjectBinding(() -> Status.PLAYING)));
       mp.audioSpectrumNumBandsProperty().bindBidirectional(numberOfBandsProperty);
 
       musicProgressProperty.bind(Bindings.createDoubleBinding(() -> {
@@ -164,7 +170,7 @@ public class Main extends Application implements Initializable {
         int minutes = (int) totalSeconds / 60;
         int rest = (int) totalSeconds - (minutes * 60);
         return String.format("%02d:%02d", minutes, rest);
-      }, mp.currentTimeProperty(), mp.totalDurationProperty(), musicPlayingProperty));
+      }, mp.currentTimeProperty(), mp.totalDurationProperty(), mp.statusProperty()));
 
       timeRemainingLabel.textProperty().bind(Bindings.createStringBinding(() -> {
         Duration currentTime = mp.getCurrentTime();
@@ -175,36 +181,41 @@ public class Main extends Application implements Initializable {
         double currentSeconds = currentTime.toSeconds();
         double totalSeconds = totalDuration.toSeconds();
         int diff = (int) totalSeconds - (int) currentSeconds;
-        int minutes = (int) diff / 60;
-        int rest = (int) diff - (minutes * 60);
+        int minutes = diff / 60;
+        int rest = diff - (minutes * 60);
         return String.format("-%02d:%02d", minutes, rest);
-      }, mp.currentTimeProperty(), mp.totalDurationProperty(), musicPlayingProperty));
+      }, mp.currentTimeProperty(), mp.totalDurationProperty(), mp.statusProperty()));
 
       musicProgress.progressProperty().bind(musicProgressProperty);
       mp.audioSpectrumThresholdProperty().bind(thresholdProperty);
-      mp.setAudioSpectrumListener((timestamp, duration, magnitudes, phases) -> {
-        List<Float> resultMagnitude = new ArrayList<>();
-        List<Float> resultPhases = new ArrayList<>();
-        for (int i = 0; i < magnitudes.length; i++) {
-          resultMagnitude.add(-Float.valueOf(magnitudes[i]));
-          resultPhases.add(Float.valueOf(phases[i]));
-        }
-        spectrum.setAll(resultMagnitude);
-        this.phases.setAll(resultPhases);
-      });
-
+      mp.setAudioSpectrumListener(createSpectrumListener());
+      playButton.requestFocus();
     }
+  }
+
+  private AudioSpectrumListener createSpectrumListener() {
+    return (timestamp, duration, magnitudes, phases) -> {
+      List<Float> resultMagnitude = new ArrayList<>();
+      List<Float> resultPhases = new ArrayList<>();
+      for (int i = 0; i < magnitudes.length; i++) {
+        resultMagnitude.add(-Float.valueOf(magnitudes[i]));
+        resultPhases.add(Float.valueOf(phases[i]));
+      }
+      spectrum.setAll(resultMagnitude);
+      this.phases.setAll(resultPhases);
+    };
   }
 
   private void initColors() {
     final float frequency = 0.3f;
-    colors = new ArrayList<>();
+    List<Color> colors = new ArrayList<>();
     for (int i = 0; i < numberOfBandsProperty.get().intValue(); i++) {
       double red = Math.sin(frequency * i + 0) * 127 / 255f + 128 / 255f;
       double green = Math.sin(frequency * i + 2) * 127 / 255f + 128 / 255f;
       double blue = Math.sin(frequency * i + 4) * 127 / 255f + 128 / 255f;
       colors.add(new Color(red, green, blue, 1));
     }
+    this.colors.setAll(colors);
   }
 
   private void initMusicData() {
@@ -243,31 +254,37 @@ public class Main extends Application implements Initializable {
     final float phaseAreaHeight = (CANVAS_HEIGHT - 2 * padding - textHeight) * 0.15f;
     final float scaleSpectrum = -spectrumAreaHeight / thresholdProperty.get().floatValue();
 
-    for (int i = 0; i < numberOfBandsProperty.get().intValue(); i++) {
-      ctx.setFill(colors.get(i));
-      float value = spectrum.isEmpty() ? -thresholdProperty.get().floatValue() : spectrum.get(i);
-      float lineHeight = value * scaleSpectrum;
-      ctx.fillRoundRect(0 + i * fullLineWidth + lineOffset, padding + spectrumAreaHeight - lineHeight, lineWidth, lineHeight, 5, 5);
-    }
+    try {
 
-    ctx.setFill(Color.YELLOW);
-    ctx.setFont(Font.font("Play", 30));
-    ctx.setTextAlign(TextAlignment.RIGHT);
-    ctx.fillText("wave", CANVAS_WIDTH - 10, padding + spectrumAreaHeight + 30);
+      for (int i = 0; i < numberOfBandsProperty.get().intValue(); i++) {
+        ctx.setFill(colors.get(i));
+        float value = spectrum.isEmpty() ? -thresholdProperty.get().floatValue() : spectrum.get(i);
+        float lineHeight = value * scaleSpectrum;
+        ctx.fillRoundRect(0 + i * fullLineWidth + lineOffset, padding + spectrumAreaHeight - lineHeight, lineWidth, lineHeight, 5, 5);
+      }
 
-    final float scalePhase = (float) (phaseAreaHeight / Math.PI);
-    for (int i = 0; i < numberOfBandsProperty.get().intValue(); i++) {
-      Color col = colors.get(i);
-      Color fadedCol = col.deriveColor(col.getHue(), col.getSaturation(), col.getBrightness(), 0.5);
-      ctx.setFill(fadedCol);
-      float value = phases.isEmpty() ? (float) Math.PI : phases.get(i);
-      value = value * scalePhase;
-      ctx.fillRoundRect((CANVAS_WIDTH - lineWidth) - (i * fullLineWidth + lineOffset), CANVAS_HEIGHT - padding - phaseAreaHeight, lineWidth, value, 5,
-          5);
+      ctx.setFill(Color.YELLOW);
+      ctx.setFont(Font.font("Play", 30));
+      ctx.setTextAlign(TextAlignment.RIGHT);
+      ctx.fillText("wave", CANVAS_WIDTH - 10, padding + spectrumAreaHeight + 30);
+
+      final float scalePhase = (float) (phaseAreaHeight / Math.PI);
+      for (int i = 0; i < numberOfBandsProperty.get().intValue(); i++) {
+        Color col = colors.get(i);
+        Color fadedCol = col.deriveColor(col.getHue(), col.getSaturation(), col.getBrightness(), 0.5);
+        ctx.setFill(fadedCol);
+        float value = phases.isEmpty() ? (float) Math.PI : phases.get(i);
+        value = value * scalePhase;
+        ctx.fillRoundRect((CANVAS_WIDTH - lineWidth) - (i * fullLineWidth + lineOffset), CANVAS_HEIGHT - padding - phaseAreaHeight, lineWidth, value,
+            5, 5);
+      }
+
+    } catch (IndexOutOfBoundsException e) {
     }
   }
 
   public static void main(String[] args) {
+    LogManager.getLogManager().reset();
     launch(args);
   }
 
@@ -279,6 +296,7 @@ public class Main extends Application implements Initializable {
     final ImageView musicImg = new ImageView(new Image(getClass().getResourceAsStream("/resources/music.png"), 28, 28, true, true));
     btnSelectSong.setGraphic(musicImg);
     ctx = canvas.getGraphicsContext2D();
+    colors = FXCollections.observableArrayList();
     spectrum = FXCollections.observableArrayList();
     phases = FXCollections.observableArrayList();
     initProperties(playImg, pauseImg);
@@ -301,30 +319,42 @@ public class Main extends Application implements Initializable {
     thresholdProperty = new SimpleObjectProperty<>(THRESHOLD);
     numberOfBandsProperty = new SimpleObjectProperty<>(NUMBER_OF_BANDS);
     numberOfBandsProperty.addListener(e -> initColors());
-
     playButton.disableProperty().bind(Bindings.isNull(selectedFileProperty));
     playButton.textProperty().bind(Bindings.when(musicPlayingProperty).then("Pause").otherwise("Play"));
     playButton.graphicProperty().bind(Bindings.when(musicPlayingProperty).then(pauseImg).otherwise(playImg));
-    playButton.setOnAction(e -> {
-      if (musicPlayingProperty.get()) {
-        mp.pause();
-      } else {
-        mp.play();
-      }
-    });
-
-    fileDirtyProperty.addListener(e -> {
-      initMusicData();
-      if (artistName != null && title != null) {
-        titleLabel.setText(String.join(" - ", artistName, title));
-      }
-    });
-
+    playButton.setOnAction(e -> playPause());
+    fileDirtyProperty.addListener(e -> reloadMusicData());
     cmbNumberOfBands.getItems().setAll(8, 12, 24, 32, 50, 64, 80, 128);
     cmbNumberOfBands.valueProperty().bindBidirectional(numberOfBandsProperty);
     Tooltip tooltip = new Tooltip("Threshold value in dB");
     cmbThreshold.setTooltip(tooltip);
     cmbThreshold.getItems().setAll(-60, -80, -90, -100, -110, -120);
     cmbThreshold.valueProperty().bindBidirectional(thresholdProperty);
+    musicProgress.setOnMouseClicked(e -> seek(e));
+  }
+
+  private void playPause() {
+    if (musicPlayingProperty.get()) {
+      mp.pause();
+    } else {
+      mp.play();
+    }
+  }
+
+  private void reloadMusicData() {
+    initMusicData();
+    if (artistName != null && title != null) {
+      titleLabel.setText(String.join(" - ", artistName, title));
+    }
+  }
+
+  private void seek(MouseEvent e) {
+    if (selectedFileProperty.get() != null) {
+      final int cursorWidth = 4;
+      double dx = e.getX() + cursorWidth;
+      double width = musicProgress.getWidth();
+      double percent = dx / width;
+      mp.seek(Duration.millis(percent * mp.getTotalDuration().toMillis()));
+    }
   }
 }
